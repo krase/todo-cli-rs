@@ -10,4 +10,5 @@ edition = "2021"
 
 anyhow = { version = "1.0.80", features = ["backtrace"] }
 crossterm = { version = "0.27.0", features = ["windows"] }
+unicode-segmentation = "1.11.0"
 

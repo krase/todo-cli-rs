@@ -3,7 +3,7 @@
 #![allow(unused_variables)]
 
 use std::fs::File;
-use std::io::{self, stdout, BufRead, Write};
+use std::io::{self, stderr, stdout, BufRead, Write};
 use std::ops::{BitXor, BitXorAssign};
 use std::time::{Duration, SystemTime};
 use std::{env, process, thread};
@@ -14,8 +14,11 @@ use crossterm::event::{poll, read, Event, KeyCode, KeyEventKind, KeyModifiers};
 use crossterm::style::{Color, Print, SetBackgroundColor, SetForegroundColor};
 use crossterm::terminal::{self, Clear, ClearType, EnterAlternateScreen, LeaveAlternateScreen};
 use crossterm::{execute, queue, ExecutableCommand, QueueableCommand};
+use screen_buf::{apply_patches, Buffer, VirtualScreen};
+use unicode_segmentation::UnicodeSegmentation;
 
 mod ui;
+mod screen_buf;
 
 use ui::{Layout, LayoutKind, Ui, Vec2};
 
@@ -25,7 +28,12 @@ struct ScreenState;
 
 impl ScreenState {
     fn enable() -> io::Result<Self> {
-        execute!(stdout(), EnterAlternateScreen, SetCursorStyle::SteadyBlock)?;
+        execute!(
+            stdout(),
+            EnterAlternateScreen,
+            SetCursorStyle::SteadyBlock,
+            Hide
+        )?;
         terminal::enable_raw_mode()?;
         Ok(Self)
     }
@@ -72,8 +80,8 @@ impl BitXor<usize> for Status {
 #[derive(Default)]
 struct App {
     quit: bool,
-    w: u16,
-    h: u16,
+    //w: u16,
+    //h: u16,
     active_status: Status,
     edit_mode: bool,
     edit_cursor: usize,
@@ -108,35 +116,55 @@ impl App {
     fn edit_add_char(&mut self, c: char) {
         let cursor = self.active_cursor();
         let edit_cursor = self.edit_cursor;
-        self.active_items_mut()[cursor].insert(edit_cursor, c);
-        self.edit_cursor += 1;
+        self.active_items_mut()[cursor].push(c);
+        //let tmp = tmp.chars() + c;
+        //tmp.
+        //self.active_items_mut()[cursor].insert(edit_cursor, c);
+        self.edit_cursor_right();
     }
+
+    fn backspace(&mut self) {
+        let cursor = self.active_cursor();
+        let edit_cursor = self.edit_cursor;
+        let mut chars = self.active_items()[cursor].chars();
+        chars.next_back();
+        
+        self.active_items_mut()[cursor] = chars.as_str().to_owned();
+
+        //let len = UnicodeSegmentation::graphemes(tmp, true).count();
+        self.edit_cursor_left();    
+    }
+
     fn edit_cursor_left(&mut self) {
-        self.edit_cursor -= 1;
+        if self.edit_cursor > 0 {
+            self.edit_cursor -= 1;
+        }
     }
     fn edit_cursor_right(&mut self) {
-        self.edit_cursor += 1;
+        let cursor = self.active_cursor();
+        let tmp = self.active_items()[cursor].as_str();
+        let len = UnicodeSegmentation::graphemes(tmp, true).count();
+        if self.edit_cursor < len {
+            self.edit_cursor += 1;
+        }
     }
+
     fn edit_cursor_begin(&mut self) {
         self.edit_cursor = 0;
     }
+
     fn edit_cursor_end(&mut self) {
         let cursor = self.active_cursor();
         self.edit_cursor = self.active_items()[cursor].len();
     }
 
-    fn backspace(&mut self) {
-        let cursor = self.active_cursor();
-        self.active_items_mut()[cursor].pop();
-        self.edit_cursor -= 1;
-    }
-
     fn set_edit(&mut self, edit_active: bool) {
         if !self.edit_mode && edit_active {
             self.edit_cursor_end();
-        } else if self.edit_mode && !edit_active {
-            let _ = execute!(stdout(), Hide, DisableBlinking);
         }
+        /* else if self.edit_mode && !edit_active {
+            let _ = execute!(stdout(), Hide, DisableBlinking);
+        }*/
         self.edit_mode = edit_active;
     }
 
@@ -200,10 +228,10 @@ impl App {
             match parse_item(line.as_str()) {
                 Some((Status::Todo, title)) => self.lists[Status::Todo as usize]
                     .items
-                    .push(title.to_string()),
+                    .push(title.trim_end().to_string()),
                 Some((Status::Done, title)) => self.lists[Status::Done as usize]
                     .items
-                    .push(title.to_string()),
+                    .push(title.trim_end().to_string()),
                 None => {
                     eprintln!("{}:{}: ERROR: ill-formed item line", file_path, index + 1);
                     process::exit(1);
@@ -300,12 +328,11 @@ fn get_file_argument(file_path: &mut String) {
     };
 }
 
-fn poll_events(app: &mut App) -> Result<()> {
-    while poll(Duration::ZERO)? {
+fn poll_events(app: &mut App, ui: &mut ui::Ui) -> Result<()> {
+    while poll(Duration::from_millis(33))? {
         match read()? {
             Event::Resize(nw, nh) => {
-                app.w = nw;
-                app.h = nh;
+                ui.resize(nw as usize, nw as usize);
             }
             Event::Paste(data) => {
                 for c in data.chars() {
@@ -341,7 +368,6 @@ fn poll_events(app: &mut App) -> Result<()> {
                             }
                             KeyCode::Enter => app.set_edit(true),
                             KeyCode::Tab => {
-                                queue!(stdout(), Print("tab"))?;
                                 app.active_status ^= 1;
                             }
                             KeyCode::Up => {
@@ -385,26 +411,34 @@ fn poll_events(app: &mut App) -> Result<()> {
     Ok(())
 }
 
+// https://github.com/tsoding/4at/blob/main/src/client.rs
+
 fn main() -> Result<()> {
-    //let mut stdout = stdout();
+    env::set_var("RUST_BACKTRACE", "full");
     let _screen_state = ScreenState::enable()?;
     let mut app = App::new();
-    (app.w, app.h) = terminal::size()?;
-    //let mut prompt = String::new();
+    let (w, h) = terminal::size()?;
 
     let mut file_path = String::new();
     get_file_argument(&mut file_path);
     app.load_state(&file_path)?;
 
     let mut last_time = SystemTime::now();
-    let mut cursor_hidden = true;
-    let _ = execute!(stdout(), Hide, DisableBlinking);
 
-    let mut ui = ui::Ui::default();
-
+    let mut ui = ui::Ui::new(w as usize, h as usize);
+    
     while !app.quit {
-        poll_events(&mut app)?;
-        queue!(stdout(), Clear(ClearType::All))?;
+        poll_events(&mut app, &mut ui)?;
+
+        if app.edit_mode {
+            let now = SystemTime::now();
+            if now - Duration::from_millis(300) > last_time {
+//                cursor_on ^= true;
+                last_time = now
+            }
+        } else {
+  //          cursor_on = false;
+        }
 
         ui.begin(Vec2::null(), LayoutKind::Vert);
         {
@@ -412,75 +446,48 @@ fn main() -> Result<()> {
             {
                 ui.begin_layout(LayoutKind::Vert);
                 {
-                    ui.label_fixed_width("TODO", (app.w / 2).into(), Color::Cyan, Color::Black);
-                    for (index, todo) in app.lists[Status::Todo as usize]
-                        .items
-                        .iter()
-                        .enumerate()
-                    {
-                        let color = if index == app.active_cursor() && app.active_status == Status::Todo && !app.edit_mode {
+                    ui.label_fixed_width("TODO", (w / 2).into(), Color::Cyan, Color::Black);
+                    for (index, todo) in app.lists[Status::Todo as usize].items.iter().enumerate() {
+                        let color = if index == app.active_cursor()
+                            && app.active_status == Status::Todo
+                            && !app.edit_mode
+                        {
                             (Color::Black, Color::White)
                         } else {
                             (Color::White, Color::Black)
                         };
                         ui.label(&format!("[ ] {}", todo), color.0, color.1);
                     }
-
-                    let edit_state = if app.edit_mode { "Edit" } else { "View" };
-                    let prompt = format!("{edit_state}: {:?}", app.active_status);
-
-                    queue!(stdout(), MoveTo(0, app.h - 1))?;
-                    queue!(stdout(), Print(&prompt))?;
-
                 }
                 ui.end_layout();
                 ui.begin_layout(LayoutKind::Vert);
                 {
-                    ui.label_fixed_width("DONE", (app.w / 2) as i32, Color::Cyan, Color::Black);
-                    for (index, todo) in app.lists[Status::Done as usize]
-                        .items
-                        .iter()
-                        .enumerate()
-                    {
-                        let color = if index == app.active_cursor() && app.active_status == Status::Done && !app.edit_mode {
+                    ui.label_fixed_width("DONE", (w / 2) as i32, Color::Cyan, Color::Black);
+                    for (index, todo) in app.lists[Status::Done as usize].items.iter().enumerate() {
+                        let color = if index == app.active_cursor()
+                            && app.active_status == Status::Done
+                            && !app.edit_mode
+                        {
                             (Color::Black, Color::White)
                         } else {
                             (Color::White, Color::Black)
                         };
-                        ui.label(&format!("[ ] {}", todo), color.0, color.1);
+                        ui.label(&format!("[x] {}", todo), color.0, color.1);
                     }
-
-                    if app.edit_mode {
-                        let cursor = app.active_cursor();
-                        queue!(
-                            stdout(),
-                            MoveTo(6 + app.edit_cursor as u16, (cursor + 1) as u16),
-                            SetCursorStyle::SteadyUnderScore,
-                        )?;
-                        let now = SystemTime::now();
-
-                        if now - Duration::from_millis(400) > last_time {
-                            if cursor_hidden {
-                                execute!(stdout(), Show)?;
-                            } else {
-                                execute!(stdout(), Hide)?;
-                            }
-                            cursor_hidden ^= true;
-                            last_time = now
-                        }
-                    } else {
-                        cursor_hidden = true;
-                    }
-
                 }
                 ui.end_layout();
+
             }
             ui.end_layout();
         }
-        ui.end();
 
-        stdout().flush()?;
-        thread::sleep(Duration::from_millis(33));
+        let edit_state = if app.edit_mode { "Edit" } else { "View" };
+        let prompt = format!("{}: {:?}", edit_state, app.active_status);
+        let prompt = format!("{:width$}", prompt, width=w as usize);
+        //let prompt = format!("{edit_state}: {:?}", app.active_status);
+        ui.screen.put_cells(0, h as usize, &prompt, Color::Black, Color::White);
+
+        ui.end();
     }
 
     app.save_state(&file_path)?;

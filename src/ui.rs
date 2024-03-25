@@ -1,9 +1,12 @@
-use std::cmp;
-use std::io::stdout;
-use std::ops::{Add, Sub, Mul, Div};
-use crossterm::{ExecutableCommand, execute, queue, QueueableCommand};
+use crossterm::cursor::{Hide, MoveTo, Show};
 use crossterm::style::{Color, Print, SetBackgroundColor, SetForegroundColor};
-use crossterm::cursor::MoveTo;
+use crossterm::terminal::{Clear, ClearType};
+use crossterm::{queue, ExecutableCommand, QueueableCommand};
+use std::cmp;
+use std::io::{self, stderr, stdout, BufRead, Write};
+use std::ops::{Add, Div, Mul, Sub};
+
+use crate::screen_buf::{apply_patches, VirtualScreen};
 
 #[derive(Default, Copy, Clone)]
 pub struct Vec2 {
@@ -81,11 +84,27 @@ impl Layout {
 #[derive(Default)]
 pub struct Ui {
     layouts: Vec<Layout>,
-    key: Option<i32>,
+    pub screen: VirtualScreen,
+    //key: Option<i32>,
 }
 
 impl Ui {
+    pub fn new(width: usize, height: usize) -> Self {
+        let ret = Self {
+            screen: VirtualScreen::new(width, height),
+            layouts: Vec::default(),
+        };
+        ret.screen.flush(&mut stdout()).unwrap();
+        ret
+    }
+
+    pub fn resize(&mut self, width: usize, height: usize) {
+        self.screen.resize(width, height);
+        self.screen.flush(&mut stdout()).unwrap();
+    }
+
     pub fn begin(&mut self, pos: Vec2, kind: LayoutKind) {
+
         assert!(self.layouts.is_empty());
         self.layouts.push(Layout {
             kind,
@@ -124,20 +143,29 @@ impl Ui {
             .layouts
             .last_mut()
             .expect("Trying to render label outside of any layout");
+        
         let pos = layout.available_pos();
 
-        queue!(stdout(), 
-            MoveTo(pos.x as u16, pos.y as u16),
-            SetForegroundColor(fg),
-            SetBackgroundColor(bg),
-            Print(text),
-            SetForegroundColor(Color::Reset),
-            SetBackgroundColor(Color::Reset),
-        ).unwrap();
+        self.screen.put_cells(pos.x as usize, pos.y as usize, text, fg, bg);
 
         layout.add_widget(Vec2::new(width, 1));
     }
 
+    /*
+    pub fn cursor(&mut self, on: bool) {
+        let layout = self
+            .layouts
+            .last_mut()
+            .expect("Trying to render label outside of any layout");
+        let pos = layout.available_pos();
+
+        queue!(stdout(), MoveTo(pos.x as u16, pos.y as u16)).unwrap();
+        if on {
+            queue!(stdout(), Show).unwrap();
+        } else {
+            queue!(stdout(), Hide).unwrap();
+        }
+    }*/
 
     #[allow(dead_code)]
     pub fn label(&mut self, text: &str, fg: Color, bg: Color) {
@@ -148,5 +176,11 @@ impl Ui {
         self.layouts
             .pop()
             .expect("Unbalanced Ui::begin() and Ui::end() calls.");
+
+        let mut stdout = stdout();
+        apply_patches(&mut stdout, &self.screen.diff()).unwrap();
+
+        stdout.flush().unwrap();
+        self.screen.swap();
     }
 }
