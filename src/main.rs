@@ -426,17 +426,22 @@ fn main() -> Result<()> {
     let mut last_time = SystemTime::now();
 
     let mut ui = ui::Ui::new(w as usize, h as usize);
-    
+    let mut last_edit = false;
     while !app.quit {
         poll_events(&mut app, &mut ui)?;
 
         if app.edit_mode {
+            if !last_edit {
+                last_edit = true;
+                let _ =ui.screen.flush(&mut stdout());
+            }
             let now = SystemTime::now();
             if now - Duration::from_millis(300) > last_time {
 //                cursor_on ^= true;
                 last_time = now
             }
         } else {
+            last_edit = false;
   //          cursor_on = false;
         }
 
