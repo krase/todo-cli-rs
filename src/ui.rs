@@ -104,7 +104,6 @@ impl Ui {
     }
 
     pub fn begin(&mut self, pos: Vec2, kind: LayoutKind) {
-
         assert!(self.layouts.is_empty());
         self.layouts.push(Layout {
             kind,
@@ -137,35 +136,32 @@ impl Ui {
             .add_widget(layout.size);
     }
 
-    pub fn label_fixed_width(&mut self, text: &str, width: i32, fg: Color, bg: Color) {
+    pub fn label_fixed_width(&mut self, text: &str, width: i32, fg: Color, bg: Color) -> Vec2 {
         // TODO(#17): Ui::label_fixed_width() does not elide the text when width < text.len()
         let layout = self
             .layouts
             .last_mut()
             .expect("Trying to render label outside of any layout");
-        
+
         let pos = layout.available_pos();
 
         self.screen.put_cells(pos.x as usize, pos.y as usize, text, fg, bg);
 
         layout.add_widget(Vec2::new(width, 1));
+
+        pos
     }
 
-    /*
-    pub fn cursor(&mut self, on: bool) {
-        let layout = self
-            .layouts
-            .last_mut()
-            .expect("Trying to render label outside of any layout");
-        let pos = layout.available_pos();
-
-        queue!(stdout(), MoveTo(pos.x as u16, pos.y as u16)).unwrap();
-        if on {
-            queue!(stdout(), Show).unwrap();
+    pub fn label_edit(&mut self, text: &str, fg: Color, bg: Color, edit: bool) {
+        let len = text.chars().count();
+        let pos = self.label_fixed_width(text, len as i32, fg, bg);
+        if edit {
+            self.screen.put_cell(pos.x as usize + len, pos.y as usize, ' ', fg, fg);
+            self.screen.put_cell(pos.x as usize + len + 1, pos.y as usize, ' ', bg, bg);
         } else {
-            queue!(stdout(), Hide).unwrap();
+            self.screen.put_cell(pos.x as usize + len, pos.y as usize, ' ', bg, bg);
         }
-    }*/
+    }
 
     #[allow(dead_code)]
     pub fn label(&mut self, text: &str, fg: Color, bg: Color) {
@@ -180,7 +176,7 @@ impl Ui {
         let mut stdout = stdout();
         apply_patches(&mut stdout, &self.screen.diff()).unwrap();
 
-        stdout.flush().unwrap();
         self.screen.swap();
+        stdout.flush().unwrap();
     }
 }

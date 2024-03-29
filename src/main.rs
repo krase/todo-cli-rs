@@ -162,9 +162,6 @@ impl App {
         if !self.edit_mode && edit_active {
             self.edit_cursor_end();
         }
-        /* else if self.edit_mode && !edit_active {
-            let _ = execute!(stdout(), Hide, DisableBlinking);
-        }*/
         self.edit_mode = edit_active;
     }
 
@@ -182,7 +179,6 @@ impl App {
     }
 
     fn list_delete(&mut self) {
-        //let active_list = self.active_status;
         let active_cursor = self.active_cursor().clone();
         if self.active_cursor() < self.active_items().len() {
             self.active_items_mut().remove(active_cursor);
@@ -366,7 +362,11 @@ fn poll_events(app: &mut App, ui: &mut ui::Ui) -> Result<()> {
                             KeyCode::Esc => {
                                 app.quit = true;
                             }
-                            KeyCode::Enter => app.set_edit(true),
+                            KeyCode::Enter => {
+                                if app.active_status == Status::Todo {
+                                    app.set_edit(true)
+                                }
+                            },
                             KeyCode::Tab => {
                                 app.active_status ^= 1;
                             }
@@ -423,22 +423,10 @@ fn main() -> Result<()> {
     get_file_argument(&mut file_path);
     app.load_state(&file_path)?;
 
-    let mut last_time = SystemTime::now();
-
     let mut ui = ui::Ui::new(w as usize, h as usize);
     
     while !app.quit {
         poll_events(&mut app, &mut ui)?;
-
-        if app.edit_mode {
-            let now = SystemTime::now();
-            if now - Duration::from_millis(300) > last_time {
-//                cursor_on ^= true;
-                last_time = now
-            }
-        } else {
-  //          cursor_on = false;
-        }
 
         ui.begin(Vec2::null(), LayoutKind::Vert);
         {
@@ -456,7 +444,7 @@ fn main() -> Result<()> {
                         } else {
                             (Color::White, Color::Black)
                         };
-                        ui.label(&format!("[ ] {}", todo), color.0, color.1);
+                        ui.label_edit(&format!("[ ] {}", todo), color.0, color.1, app.edit_mode && index == app.active_cursor());
                     }
                 }
                 ui.end_layout();
