@@ -281,12 +281,16 @@ impl ItemList {
     fn cursor_up(&mut self) {
         if self.cursor > 0 {
             self.cursor -= 1
+        } else {
+            self.cursor = self.items.len() - 1;
         }
     }
 
     fn cursor_down(&mut self) {
         if self.cursor + 1 < self.items.len() {
             self.cursor += 1;
+        } else {
+            self.cursor = 0;
         }
     }
 
@@ -325,7 +329,7 @@ fn get_file_argument(file_path: &mut String) {
 }
 
 fn poll_events(app: &mut App, ui: &mut ui::Ui) -> Result<()> {
-    while poll(Duration::from_millis(33))? {
+    while poll(Duration::from_millis(10))? {
         match read()? {
             Event::Resize(nw, nh) => {
                 ui.resize(nw as usize, nw as usize);
@@ -353,9 +357,13 @@ fn poll_events(app: &mut App, ui: &mut ui::Ui) -> Result<()> {
                             _ => {}
                         }
                     } else {
+                        // Not in edit mode
                         match event.code {
                             KeyCode::Char(x) => {
                                 if x == 'c' && event.modifiers.contains(KeyModifiers::CONTROL) {
+                                    app.quit = true;
+                                }
+                                else if x == 'q' {
                                     app.quit = true;
                                 }
                             }
@@ -431,7 +439,7 @@ fn main() -> Result<()> {
         if app.edit_mode {
             if !last_edit {
                 last_edit = true;
-                let _ =ui.screen.flush(&mut stdout());
+                //let _ =ui.screen.flush(&mut stdout());
             }
         }
 

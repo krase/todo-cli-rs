@@ -146,7 +146,9 @@ impl Ui {
         let pos = layout.available_pos();
 
         self.screen.put_cells(pos.x as usize, pos.y as usize, text, fg, bg);
-
+        let fill = std::iter::repeat(" ").take((layout.size.x-width-4).abs() as usize).collect::<String>();
+        self.screen.put_cells((pos.x + width) as usize, pos.y as usize, &fill, fg, bg);
+        
         layout.add_widget(Vec2::new(width, 1));
 
         pos
