@@ -424,9 +424,16 @@ fn main() -> Result<()> {
     app.load_state(&file_path)?;
 
     let mut ui = ui::Ui::new(w as usize, h as usize);
-    
+    let mut last_edit = false;
     while !app.quit {
         poll_events(&mut app, &mut ui)?;
+
+        if app.edit_mode {
+            if !last_edit {
+                last_edit = true;
+                let _ =ui.screen.flush(&mut stdout());
+            }
+        }
 
         ui.begin(Vec2::null(), LayoutKind::Vert);
         {
